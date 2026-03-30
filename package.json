@@ -1,0 +1,50 @@
+{
+  "name": "plyer-react",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A beautiful, responsive, and feature-rich React video player component.",
+  "main": "dist/plyer-react.umd.cjs",
+  "module": "dist/plyer-react.js",
+  "style": "dist/style.css",
+  "files": [
+    "dist"
+  ],
+  "peerDependencies": {
+    "react": ">=16.8.0",
+    "react-dom": ">=16.8.0"
+  },
+  "dependencies": {
+    "hls.js": "^1.6.15",
+    "dashjs": "^5.1.1"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "scripts": {
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "react",
+    "video",
+    "player",
+    "hls",
+    "dash",
+    "html5-video",
+    "custom-controls",
+    "nextjs"
+  ],
+  "author": "Your Name <your.email@example.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/plyer-react.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/plyer-react/issues"
+  },
+  "homepage": "https://github.com/yourusername/plyer-react#readme"
+}
