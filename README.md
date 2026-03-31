@@ -51,4 +51,4 @@ function App() {
 
 ## License
 
-MIT © [Your Name](https://github.com/yourusername)
+MIT © [Andev70](https://github.com/Andev70)
