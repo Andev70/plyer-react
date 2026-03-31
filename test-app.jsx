@@ -6,8 +6,8 @@ const App = () => (
   <div style={{ width: '800px', margin: '50px auto' }}>
     <h1>React Player Test</h1>
     <Plyer 
-      src="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-      poster="https://peach.blender.org/wp-content/uploads/bbb-splash.png"
+      src="https://vjs.zencdn.net/v/oceans.mp4"
+      poster="https://vjs.zencdn.net/v/oceans.png"
     />
   </div>
 );

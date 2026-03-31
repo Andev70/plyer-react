@@ -3,7 +3,9 @@ import Hls from 'hls.js';
 import dashjs from 'dashjs';
 import './Plyer.css';
 
-const Plyer = ({ src, sources = [], poster, options = {} }) => {
+const DEFAULT_SOURCES = [];
+
+const Plyer = ({ src, sources = DEFAULT_SOURCES, poster, options = {} }) => {
   const containerRef = useRef(null);
   const videoRef = useRef(null);
   const previewVideoRef = useRef(null);
@@ -28,10 +30,13 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
   const [hlsLevels, setHlsLevels] = useState([]);
   const [dashBitrates, setDashBitrates] = useState([]);
   const [activeQualityIndex, setActiveQualityIndex] = useState(-1);
-  const [hls, setHls] = useState(null);
-  const [dash, setDash] = useState(null);
+  
+  const hlsRef = useRef(null);
+  const dashRef = useRef(null);
+  const currentSrcRef = useRef('');
 
   const formatTime = (time) => {
+    if (isNaN(time) || time === Infinity) return "0:00";
     const s = Math.floor(time % 60);
     const m = Math.floor(time / 60) % 60;
     const h = Math.floor(time / 3600);
@@ -42,19 +47,28 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
   const loadSource = useCallback((sourceUrl) => {
     const video = videoRef.current;
     if (!video || !sourceUrl) return;
+    
+    // Only reload if the source actually changed
+    if (sourceUrl === currentSrcRef.current) return;
+    currentSrcRef.current = sourceUrl;
 
-    if (hls) {
-      hls.destroy();
-      setHls(null);
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
     }
-    if (dash) {
-      dash.reset();
-      setDash(null);
+    if (dashRef.current) {
+      dashRef.current.reset();
+      dashRef.current = null;
     }
 
-    video.pause();
-    video.removeAttribute('src');
-    video.load();
+    // Prepare state for new source
+    setIsLoading(true);
+    setHlsLevels([]);
+    setDashBitrates([]);
+    setQualityLabel('Auto');
+    setActiveQualityIndex(-1);
+    setBuffered(0);
+    setCurrentTime(0);
 
     if (previewVideoRef.current) {
       previewVideoRef.current.src = sourceUrl;
@@ -65,43 +79,44 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
 
     if (extension === 'm3u8') {
       if (Hls.isSupported()) {
-        const newHls = new Hls();
-        newHls.loadSource(sourceUrl);
-        newHls.attachMedia(video);
-        newHls.on(Hls.Events.MANIFEST_PARSED, () => {
-          setHlsLevels(newHls.levels);
-          setQualityLabel('Auto');
-          setActiveQualityIndex(-1);
+        const hls = new Hls();
+        hls.loadSource(sourceUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          setHlsLevels(hls.levels);
+          setIsLoading(false);
         });
-        setHls(newHls);
+        hlsRef.current = hls;
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = sourceUrl;
       }
     } else if (extension === 'mpd') {
-      const newDash = dashjs.MediaPlayer().create();
-      newDash.initialize(video, sourceUrl, false);
-      newDash.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
-        setDashBitrates(newDash.getBitrateInfoListFor('video'));
-        setQualityLabel('Auto');
-        setActiveQualityIndex(-1);
+      const dash = dashjs.MediaPlayer().create();
+      dash.initialize(video, sourceUrl, false);
+      dash.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
+        setDashBitrates(dash.getBitrateInfoListFor('video'));
+        setIsLoading(false);
       });
-      setDash(newDash);
+      dashRef.current = dash;
     } else {
       video.src = sourceUrl;
-      if (sources.length) {
-        const current = sources.find(s => s.src === sourceUrl) || sources[0];
-        setQualityLabel(current.label);
+      if (sources && sources.length) {
+        const current = sources.find(s => s.src === sourceUrl);
+        if (current) setQualityLabel(current.label);
       }
     }
-  }, [hls, dash, sources]);
+  }, [sources]);
 
   useEffect(() => {
-    loadSource(src || (sources.length ? sources[0].src : ''));
+    const initialSrc = src || (sources && sources.length ? sources[0].src : '');
+    if (initialSrc) {
+      loadSource(initialSrc);
+    }
     return () => {
-      if (hls) hls.destroy();
-      if (dash) dash.reset();
+      if (hlsRef.current) hlsRef.current.destroy();
+      if (dashRef.current) dashRef.current.reset();
     };
-  }, [src, sources.length, loadSource]);
+  }, [src, sources, loadSource]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -119,11 +134,6 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
     }
   };
 
-  const toggleMute = () => {
-    videoRef.current.muted = !videoRef.current.muted;
-    setIsMuted(videoRef.current.muted);
-  };
-
   const handleVolumeChange = (e) => {
     const val = parseFloat(e.target.value);
     videoRef.current.volume = val;
@@ -138,6 +148,7 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
 
   const handleLoadedMetadata = () => {
     setDuration(videoRef.current.duration);
+    setIsLoading(false);
   };
 
   const handleProgress = () => {
@@ -161,10 +172,12 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
   const handleMouseMove = (e) => {
     const rect = timelineRef.current.getBoundingClientRect();
     const percent = Math.min(Math.max(0, e.clientX - rect.left), rect.width) / rect.width;
-    setPreviewTime(percent * videoRef.current.duration);
+    const time = percent * videoRef.current.duration;
+    setPreviewTime(time);
     setPreviewLeft(percent * 100);
-    if (previewVideoRef.current && previewVideoRef.current.readyState >= 2) {
-      previewVideoRef.current.currentTime = percent * videoRef.current.duration;
+    
+    if (previewVideoRef.current && !isNaN(time)) {
+      previewVideoRef.current.currentTime = time;
     }
   };
 
@@ -173,9 +186,11 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
         const canvas = document.getElementById('preview-canvas');
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
+        
         const draw = () => {
             ctx.drawImage(previewVideoRef.current, 0, 0, 160, 90);
         };
+        
         const currentPreview = previewVideoRef.current;
         currentPreview.addEventListener('seeked', draw);
         return () => currentPreview.removeEventListener('seeked', draw);
@@ -197,21 +212,26 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
   };
 
   const changeHlsQuality = (index) => {
-    hls.currentLevel = index;
-    setActiveQualityIndex(index);
-    setQualityLabel(index === -1 ? 'Auto' : `${hls.levels[index].height}p`);
+    if (hlsRef.current) {
+        hlsRef.current.currentLevel = index;
+        setActiveQualityIndex(index);
+        setQualityLabel(index === -1 ? 'Auto' : `${hlsRef.current.levels[index].height}p`);
+    }
     setShowQualityMenu(false);
   };
 
   const changeDashQuality = (index) => {
-    if (index === -1) {
-      dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: true } } } });
-    } else {
-      dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
-      dash.setQualityFor('video', index);
+    const dash = dashRef.current;
+    if (dash) {
+        if (index === -1) {
+          dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: true } } } });
+        } else {
+          dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
+          dash.setQualityFor('video', index);
+        }
+        setActiveQualityIndex(index);
+        setQualityLabel(index === -1 ? 'Auto' : `${dashBitrates[index].height}p`);
     }
-    setActiveQualityIndex(index);
-    setQualityLabel(index === -1 ? 'Auto' : `${dashBitrates[index].height}p`);
     setShowQualityMenu(false);
   };
 
@@ -259,19 +279,36 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleLoadedMetadata}
         onProgress={handleProgress}
         onWaiting={() => setIsLoading(true)}
         onPlaying={() => setIsLoading(false)}
         onCanPlay={() => setIsLoading(false)}
+        onSeeking={() => setIsLoading(true)}
+        onSeeked={() => setIsLoading(false)}
+        onCanPlayThrough={() => setIsLoading(false)}
+        onLoadStart={() => setIsLoading(true)}
+        onLoadedData={() => setIsLoading(false)}
+        onLoadedMetadata={handleLoadedMetadata}
+        onError={() => setIsLoading(false)}
+        onAbort={() => setIsLoading(false)}
+        onStalled={() => setIsLoading(false)}
+        onSuspend={() => setIsLoading(false)}
         onClick={togglePlay}
         playsInline
+        crossOrigin="anonymous"
       />
 
-      <video ref={previewVideoRef} muted style={{ display: 'none' }} crossOrigin="anonymous" />
+      <video ref={previewVideoRef} muted style={{ display: 'none' }} crossOrigin="anonymous" preload="auto" />
 
-      <div className="video-overlay" style={{ pointerEvents: 'none' }}>
+      <div className="video-overlay" onClick={togglePlay}>
         {isLoading && <div className="loader" style={{ display: 'block' }}></div>}
+        {!isPlaying && !isLoading && (
+            <div className="play-button-overlay">
+                <svg viewBox="0 0 24 24" width="64" height="64" fill="white">
+                    <path d="M8 5v14l11-7z"/>
+                </svg>
+            </div>
+        )}
       </div>
 
       <div className="controls-container">
@@ -307,8 +344,11 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
             </button>
 
             <div className="volume-container">
-              <button className="control-btn" onClick={toggleMute}>
-                {isMuted ? (
+              <button className="control-btn" onClick={() => {
+                videoRef.current.muted = !videoRef.current.muted;
+                setIsMuted(videoRef.current.muted);
+              }}>
+                {isMuted || volume === 0 ? (
                   <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
                 ) : (
                   <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
@@ -332,7 +372,7 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
                     {qualityLabel && <span id="quality-label" style={{ display: 'block' }}>{qualityLabel}</span>}
                 </button>
                 <div className={`quality-menu ${showQualityMenu ? 'show' : ''}`}>
-                  {hls && (
+                  {hlsRef.current && (
                     <>
                       <button className={activeQualityIndex === -1 ? 'active' : ''} onClick={() => changeHlsQuality(-1)}>
                         <span>Auto</span>
@@ -346,7 +386,7 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
                       ))}
                     </>
                   )}
-                  {dash && (
+                  {dashRef.current && (
                     <>
                       <button className={activeQualityIndex === -1 ? 'active' : ''} onClick={() => changeDashQuality(-1)}>
                         <span>Auto</span>
@@ -360,7 +400,7 @@ const Plyer = ({ src, sources = [], poster, options = {} }) => {
                       ))}
                     </>
                   )}
-                  {!hls && !dash && sources.map((s, i) => (
+                  {!hlsRef.current && !dashRef.current && sources.map((s, i) => (
                     <button key={i} className={activeQualityIndex === i ? 'active' : ''} onClick={() => changeManualQuality(i)}>
                       <span>{s.label}</span>
                       <CheckIcon />
